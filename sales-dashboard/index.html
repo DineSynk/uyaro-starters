@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sales today</title>
+<style>
+  :root { --bg: #fff; --panel: #eeeef3; --ink: #15151d; --muted: #666675; --accent: #4b3fe0; --line: #dcdce5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; display: grid; gap: 28px; }
+  header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 12px; }
+  h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.02em; }
+  h2 { margin: 0 0 12px; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: inherit; }
+  .figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+  .figure { background: var(--panel); border-radius: 16px; padding: 18px; }
+  .figure b { display: block; font-size: 1.9rem; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .figure span { color: var(--muted); font-size: 0.9rem; }
+  .columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 28px; }
+  .row { display: grid; grid-template-columns: minmax(0, 9rem) minmax(0, 1fr) 3rem; gap: 10px; align-items: center; font-size: 0.92rem; padding: 4px 0; }
+  .row i { display: block; height: 10px; border-radius: 5px; background: var(--accent); min-width: 2px; }
+  .row em { font-style: normal; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .hours { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 3px; align-items: end; height: 120px; }
+  .hours i { display: block; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 1px; }
+  .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 0.75rem; margin-top: 4px; }
+  #state { color: var(--muted); font-size: 0.9rem; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0f0f15; --panel: #1a1a23; --ink: #f1f1f6; --muted: #a0a0b2; --accent: #8f87ff; --line: #32323f; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1 id="title">Sales</h1>
+      <div id="state">Loading…</div>
+    </div>
+    <label>Day <input type="date" id="day"></label>
+  </header>
+  <section class="figures">
+    <div class="figure"><b id="revenue">–</b><span>Revenue</span></div>
+    <div class="figure"><b id="orders">–</b><span>Orders</span></div>
+    <div class="figure"><b id="average">–</b><span>Average bill</span></div>
+    <div class="figure"><b id="busiest">–</b><span>Busiest hour</span></div>
+  </section>
+  <section>
+    <h2>Orders by hour</h2>
+    <div class="hours" id="hours"></div>
+    <div class="axis"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>11pm</span></div>
+  </section>
+  <div class="columns">
+    <section><h2>Top items</h2><div id="items"></div></section>
+    <section><h2>How people paid</h2><div id="payments"></div></section>
+  </div>
+</main>
+<script type="module">
+  import { DEMO, dayInIndia, ordersBetween, summarise, yesterdayInIndia } from '../uyaro.mjs';
+
+  // Your own store: replace DEMO with { apiBase, merchantId, storeId, key }.
+  // A key in a web page is visible to every visitor. That is fine for the public demo café and for a page
+  // only you open. For a page other people see, fetch from your own server and keep the key there.
+  const store = DEMO;
+
+  const $ = (id) => document.getElementById(id);
+  const rupees = (amount) => `₹${Math.round(amount).toLocaleString('en-IN')}`;
+  const rows = (pairs) => {
+    const most = Math.max(1, ...pairs.map(([, count]) => count));
+    return pairs.map(([name, count]) => `<div class="row"><span>${name}</span><i style="width:${(count / most) * 100}%"></i><em>${count}</em></div>`).join('') || '<div class="row"><span>Nothing yet</span></div>';
+  };
+
+  async function show(date) {
+    $('state').textContent = 'Loading…';
+    try {
+      const { from, to } = dayInIndia(date);
+      const summary = summarise(await ordersBetween(store, from, to));
+      $('title').textContent = `Sales on ${new Date(`${date}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}`;
+      $('revenue').textContent = rupees(summary.revenue);
+      $('orders').textContent = summary.orders;
+      $('average').textContent = rupees(summary.averageBill);
+      $('busiest').textContent = summary.busiestHour === null ? '–' : `${summary.busiestHour}:00`;
+      const most = Math.max(1, ...summary.ordersByHour);
+      $('hours').innerHTML = summary.ordersByHour.map((count, hour) => `<i title="${hour}:00, ${count} orders" style="height:${(count / most) * 100}%"></i>`).join('');
+      $('items').innerHTML = rows(summary.topItems.map((item) => [item.name, item.quantity]));
+      $('payments').innerHTML = rows(Object.entries(summary.payments).sort((a, b) => b[1] - a[1]).map(([method, count]) => [method.toUpperCase(), count]));
+      $('state').textContent = store === DEMO ? 'Uyaro Demo Café (invented sales)' : '';
+    } catch (error) {
+      $('state').textContent = error.message;
+    }
+  }
+
+  $('day').value = yesterdayInIndia();
+  $('day').addEventListener('change', () => show($('day').value));
+  show($('day').value);
+</script>
+</body>
+</html>
